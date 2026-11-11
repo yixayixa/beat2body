@@ -7,6 +7,7 @@ pose_openpose.py. Everything they share and all other steps live in this file:
     python 2d/scripts/pipeline.py clean --tool NAME    4.4 keypoint cleaning and normalization
     python 2d/scripts/pipeline.py audio ...            4.5 audio extraction and features
     python 2d/scripts/pipeline.py clips ...            4.6 alignment + 4.7 split, clips and meta.csv
+    python 2d/scripts/pipeline.py all --tool NAME      clean + audio + clips (add --pose to run 4.3 first)
 
 Run from the repository root. Use `python 2d/scripts/pipeline.py <step> --help` for options.
 """
@@ -234,6 +235,16 @@ class PreviewWriter:
 # ---------------------------------------------------------------------------
 # Shared command line for the three pose scripts
 # ---------------------------------------------------------------------------
+def add_preview_arg(p, tool="<tool>"):
+    p.add_argument("--preview", type=int, nargs="?", const=-1, default=0, metavar="N",
+                   help=f"also write skeleton preview videos (<video_id>_{tool}.mp4): "
+                        "--preview alone = every video, --preview N = the first N videos")
+
+
+def wants_preview(args, n):
+    return args.preview < 0 or n < args.preview
+
+
 def pose_arg_parser(tool, description):
     p = argparse.ArgumentParser(description=description)
     p.add_argument("--categories", nargs="*", default=None,
@@ -244,8 +255,7 @@ def pose_arg_parser(tool, description):
     p.add_argument("--fps", type=float, default=DEFAULT_FPS, help="resample videos to this frame rate")
     p.add_argument("--height", type=int, default=None,
                    help="resize frames to this height before inference (default: original size)")
-    p.add_argument("--preview", type=int, default=0,
-                   help=f"also write skeleton preview videos (<video_id>_{tool}.mp4) for the first N videos")
+    add_preview_arg(p, tool)
     p.add_argument("--overwrite", action="store_true", help="re-run videos that already have output")
     return p
 
@@ -272,7 +282,7 @@ def run_pose_tool(tool, args, make_infer, native_names, color):
         if args.height:
             w, h = int(round(w * args.height / h / 2)) * 2, args.height
         preview = None
-        if n < args.preview:
+        if wants_preview(args, n):
             preview = PreviewWriter(preview_path(tool, cat, vid), args.fps, w, h, f"{tool}  {cat}/{vid}")
         infer = make_infer(args.fps)
         coco, native = [], []
@@ -665,12 +675,13 @@ def add_clips_args(p):
     p.add_argument("--ratios", nargs=3, type=float, default=[0.7, 0.15, 0.15], metavar=("TRAIN", "VAL", "TEST"))
     p.add_argument("--by", choices=["video", "dancer"], default="video")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--limit", type=int, default=None, help="at most N videos per category")
 
 
 def run_clips(args):
     # Only videos that have both cleaned keypoints and audio features take part.
     videos, skipped = [], []
-    for cat, vid, _ in list_videos(args.categories):
+    for cat, vid, _ in list_videos(args.categories, limit=getattr(args, "limit", None)):
         need = [clean_keypoint_path(cat, vid)] + [
             feature_path(k, vid) for k in ("audio_mel", "audio_onset", "beats")]
         missing = [rel(x) for x in need if not os.path.exists(x)]
@@ -736,19 +747,62 @@ def run_clips(args):
 # ===========================================================================
 # Command line
 # ===========================================================================
+ALL_DOC = """4.4 + 4.5 + 4.6 + 4.7 in one command: clean -> audio -> clips.
+
+With --pose, the pose tool given by --tool (4.3) runs first, so a single
+command goes from the videos to the clips:
+
+    python 2d/scripts/pipeline.py all --tool dwpose --categories la_hiphop
+    python 2d/scripts/pipeline.py all --tool dwpose --categories la_hiphop --pose --preview
+
+Every option of the clean, audio and clips steps is accepted here as well.
+"""
+
+
+def add_all_args(p):
+    add_clean_args(p)
+    add_audio_args(p)
+    add_clips_args(p)
+    p.add_argument("--pose", action="store_true", help="run pose_<tool>.py first (4.3)")
+    add_preview_arg(p)
+
+
+def run_all(args):
+    if args.pose:
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"pose_{args.tool}.py")
+        cmd = [sys.executable, script]
+        if args.categories:
+            cmd += ["--categories", *args.categories]
+        if args.limit:
+            cmd += ["--limit", str(args.limit)]
+        if args.preview:
+            cmd += ["--preview"] + ([] if args.preview < 0 else [str(args.preview)])
+        if args.overwrite:
+            cmd += ["--overwrite"]
+        print(f"== 4.3 pose ({args.tool})")
+        subprocess.run(cmd, check=True)
+    print(f"== 4.4 clean ({args.tool})")
+    run_clean(args)
+    print("== 4.5 audio")
+    run_audio(args)
+    print("== 4.6 + 4.7 clips")
+    run_clips(args)
+
+
 STEPS = {
     "frames": (FRAMES_DOC, add_frames_args, run_frames),
     "clean": (CLEAN_DOC, add_clean_args, run_clean),
     "audio": (AUDIO_DOC, add_audio_args, run_audio),
     "clips": (CLIPS_DOC, add_clips_args, run_clips),
+    "all": (ALL_DOC, add_all_args, run_all),
 }
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = p.add_subparsers(dest="step", required=True, metavar="{frames,clean,audio,clips}")
+    sub = p.add_subparsers(dest="step", required=True, metavar="{frames,clean,audio,clips,all}")
     for name, (doc, add_args, _) in STEPS.items():
-        sp = sub.add_parser(name, help=doc.splitlines()[0], description=doc,
+        sp = sub.add_parser(name, help=doc.splitlines()[0], description=doc, conflict_handler="resolve",
                             formatter_class=argparse.RawDescriptionHelpFormatter)
         add_args(sp)
     args = p.parse_args()

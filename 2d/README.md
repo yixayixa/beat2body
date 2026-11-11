@@ -56,7 +56,14 @@ python 2d/scripts/pipeline.py audio                     # 4.5
 python 2d/scripts/pipeline.py clips                     # 4.6 + 4.7
 ```
 
-Every step accepts `--categories` (e.g. `--categories la_hiphop house`) and most accept `--limit N` for a quick test. Use `--help` for all options (e.g. `python 2d/scripts/pipeline.py clean --help`).
+Steps 4.4–4.7 can also run as one command; add `--pose` to run the pose tool (4.3) first:
+
+```bash
+python 2d/scripts/pipeline.py all --tool dwpose --categories la_hiphop
+python 2d/scripts/pipeline.py all --tool dwpose --categories la_hiphop --pose --preview
+```
+
+Every step accepts `--categories` (e.g. `--categories la_hiphop house`) and `--limit N` (at most N videos per category) for a quick test. Use `--help` for all options (e.g. `python 2d/scripts/pipeline.py clean --help`).
 
 **Requirements:** Python 3.9+, `ffmpeg` on the PATH, `numpy`, `scipy`, `opencv-python`; plus the packages listed at the top of each pose script and `librosa` for 4.5.
 
@@ -95,7 +102,7 @@ python 2d/scripts/pose_dwpose.py --categories la_hiphop house --preview 2
 - Output: `2d/keypoints/<category>/<video_id>_<tool>.npz` (e.g. `..._dwpose.npz`) with `keypoints` of shape `(T, 17, 3)` (x, y in pixels, confidence) in the shared **COCO-17** joint order, and `native` with the tool's own joint layout. The tool name in the file name keeps the three outputs apart.
 - All three tools are mapped to COCO-17 so their outputs can be compared directly and any of them can feed 4.4. COCO-17 has no neck or pelvis joint; the pelvis is the mid-point of the two hips.
 - Frames where no person is found are `NaN`. If several people are found, the most confident one is kept.
-- `--preview N` writes skeleton overlay videos for the first N videos next to the keypoints (`2d/keypoints/<category>/<video_id>_<tool>.mp4`) for visual checks.
+- `--preview` writes skeleton overlay videos for every video (`--preview N`: only the first N) next to the keypoints (`2d/keypoints/<category>/<video_id>_<tool>.mp4`) for visual checks.
 - Model weights download automatically on first run (DWPose and OpenPose from public Hugging Face repos, MediaPipe from Google); no account is needed.
 - The confidence values are on different scales per tool, so each tool has its own default threshold (DWPose 0.3, MediaPipe 0.5, OpenPose 0.1).
 - OpenPose models are licensed for academic / non-commercial research only.
