@@ -56,6 +56,8 @@ def load_body_class(scales):
         src = src.replace("from . import util", "from . import util\n\nSCALES = [1.0]", 1)
     open(body, "w").write(src)
     sys.path.insert(0, CACHE)
+    # util.py and body.py import each other; util must be imported first (as in controlnet_aux).
+    importlib.import_module(f"{PKG}.util")
     mod = importlib.import_module(f"{PKG}.body")
     mod.SCALES = list(scales)
     return mod.Body

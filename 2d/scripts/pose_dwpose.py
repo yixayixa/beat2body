@@ -42,10 +42,24 @@ def build_model(device):
 
     if device == "auto":
         device = "cuda" if "CUDAExecutionProvider" in ort.get_available_providers() else "cpu"
+    if device.startswith("cuda"):
+        # Load the CUDA / cuDNN libraries before creating the sessions; without this
+        # onnxruntime can silently fall back to the CPU.
+        try:
+            import torch  # noqa: F401  (its wheels ship the CUDA / cuDNN libraries)
+        except ImportError:
+            pass
+        if hasattr(ort, "preload_dlls"):
+            ort.preload_dlls()
     det = hf_hub_download("RedHash/DWPose", "yolox_l.onnx")
     pose = hf_hub_download("RedHash/DWPose", "dw-ll_ucoco_384.onnx")
-    print(f"[{TOOL}] running on {device}")
-    return Wholebody(model_det=det, model_pose=pose, device=device)
+    model = Wholebody(model_det=det, model_pose=pose, device=device)
+    used = model.session_pose.get_providers()
+    actual = "cuda" if "CUDAExecutionProvider" in used else "cpu"
+    print(f"[{TOOL}] running on {actual} (onnxruntime providers: {', '.join(used)})")
+    if device.startswith("cuda") and actual == "cpu":
+        print(f"[{TOOL}] warning: CUDA was requested but is not available in onnxruntime; using the CPU")
+    return model
 
 
 def main():
