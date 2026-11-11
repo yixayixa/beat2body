@@ -19,10 +19,9 @@ apt-get -qq install -y libatlas-base-dev libprotobuf-dev libleveldb-dev libsnapp
 echo "== 2/5 source code"
 rm -rf openpose
 git clone -q --depth 1 https://github.com/CMU-Perceptual-Computing-Lab/openpose.git
-# pin the Caffe version that is known to build
-sed -i 's/execute_process(COMMAND git checkout --recursive master WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}\/3rdparty\/caffe)/execute_process(COMMAND git checkout f019d0dfe86f49d1140961f8c7dec22130c83154 WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}\/3rdparty\/caffe)/g' openpose/CMakeLists.txt
 (cd openpose && git submodule update --init --recursive --remote > /dev/null)
-(cd openpose/3rdparty/caffe && git checkout -q f019d0dfe86f49d1140961f8c7dec22130c83154)
+# use the Caffe commit the OpenPose build itself selects for CUDA
+(cd openpose/3rdparty/caffe && git checkout -q 1807aad)
 
 # Colab ships CUDA 13, which needs C++17 and removed a few old device fields
 sed -i 's/-std=c++11/-std=c++17/g; s/-std=c++14/-std=c++17/g' openpose/CMakeLists.txt
@@ -50,6 +49,10 @@ cmake .. -DUSE_CUDNN=OFF -DBUILD_PYTHON=OFF \
   || { tail -40 /content/openpose_cmake.log; exit 1; }
 
 echo "== 5/5 compile (about 20-40 minutes)"
-make -j"$(nproc)" > /content/openpose_make.log 2>&1 || { tail -60 /content/openpose_make.log; exit 1; }
+# print each new progress percentage; the full log goes to /content/openpose_make.log
+set -o pipefail
+make -j"$(nproc)" 2>&1 | tee /content/openpose_make.log \
+  | grep --line-buffered -oE '^\[ *[0-9]+%\]' | uniq \
+  || { grep -E "error|Error" /content/openpose_make.log | head -20; tail -20 /content/openpose_make.log; exit 1; }
 ls -la "$BIN"
 echo "OpenPose build finished"
