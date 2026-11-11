@@ -44,19 +44,19 @@ Keeping the raw skeleton as the primary artifact ensures later comparison with 3
 
 ## 4. Concrete pipeline
 
-Each step has a script in `2d/scripts/`. Run them from the repository root, in this order:
+`2d/scripts/` has four files: one script per pose tool (4.3) and `pipeline.py` with the shared code and every other step. Run from the repository root, in this order:
 
 ```bash
-python 2d/scripts/extract_frames.py --limit 1    # 4.2 (optional, JPEGs for inspection)
-python 2d/scripts/pose_dwpose.py --preview 2     # 4.3 (pick one or more of the three tools)
+python 2d/scripts/pipeline.py frames --limit 1          # 4.2 (optional, JPEGs for inspection)
+python 2d/scripts/pose_dwpose.py --preview 2            # 4.3 (one or more of the three tools)
 python 2d/scripts/pose_mediapipe.py --preview 2
 python 2d/scripts/pose_openpose.py --preview 2
-python 2d/scripts/clean_keypoints.py --tool dwpose   # 4.4 (choose the tool used for training)
-python 2d/scripts/extract_audio_features.py      # 4.5
-python 2d/scripts/make_clips.py                  # 4.6 + 4.7
+python 2d/scripts/pipeline.py clean --tool dwpose       # 4.4 (choose the tool used for training)
+python 2d/scripts/pipeline.py audio                     # 4.5
+python 2d/scripts/pipeline.py clips                     # 4.6 + 4.7
 ```
 
-Every script accepts `--categories` (e.g. `--categories la_hiphop house`) and most accept `--limit N` for a quick test. Use `--help` for all options.
+Every step accepts `--categories` (e.g. `--categories la_hiphop house`) and most accept `--limit N` for a quick test. Use `--help` for all options (e.g. `python 2d/scripts/pipeline.py clean --help`).
 
 **Requirements:** Python 3.9+, `ffmpeg` on the PATH, `numpy`, `scipy`, `opencv-python`; plus the packages listed at the top of each pose script and `librosa` for 4.5.
 
@@ -72,7 +72,7 @@ Every script accepts `--categories` (e.g. `--categories la_hiphop house`) and mo
 The AIST videos are **59.94 fps**. Everything downstream uses a fixed **30 fps**, resampled with `ffmpeg -vf fps=30` to avoid variable frame timing:
 
 ```bash
-python 2d/scripts/extract_frames.py --categories la_hiphop --limit 1
+python 2d/scripts/pipeline.py frames --categories la_hiphop --limit 1
 # -> 2d/frames/la_hiphop/<video_id>/000001.jpg ...
 ```
 
@@ -103,7 +103,7 @@ python 2d/scripts/pose_dwpose.py --categories la_hiphop house --preview 2
 ### 4.4 Keypoint cleaning and interpolation
 
 ```bash
-python 2d/scripts/clean_keypoints.py --tool dwpose
+python 2d/scripts/pipeline.py clean --tool dwpose
 ```
 
 Reads `2d/keypoints/<category>/<video_id>_<tool>.npz` and writes the training keypoints to `2d/keypoints/<category>/<video_id>.npz`:
@@ -118,7 +118,7 @@ Reads `2d/keypoints/<category>/<video_id>_<tool>.npz` and writes the training ke
 ### 4.5 Audio feature extraction
 
 ```bash
-python 2d/scripts/extract_audio_features.py --categories la_hiphop house
+python 2d/scripts/pipeline.py audio --categories la_hiphop house
 ```
 
 - Audio is extracted as mono 22.05 kHz to `2d/audio/<category>/<video_id>.wav`.
@@ -131,21 +131,21 @@ See the [librosa tutorial](https://librosa.org/doc/latest/tutorial.html).
 ### 4.6 Alignment
 
 ```bash
-python 2d/scripts/make_clips.py --window 240 --stride 60
+python 2d/scripts/pipeline.py clips --window 240 --stride 60
 ```
 
 - Motion and audio features are both at 30 fps, so **frame `t` in motion corresponds to feature frame `t` in audio**; alignment only trims both to the shorter length.
 - **Variable-length videos:** do **not** force everything to the same length. The script uses a **sliding window**: overlapping clips of 120–300 frames (`--window`, default 240) with a stride of 60 frames. Each clip in `2d/clips/<split>/` stores its keypoints, valid mask, audio-feature slices, beats and category label.
 - `2d/meta.csv` lists every clip: `clip_path, audio_feat_path, category, start_frame, end_frame, split, video_id, dancer`.
-- The same script does the split in 4.7 and writes `2d/categories.json` (section 6).
+- The same step does the split in 4.7 and writes `2d/categories.json` (section 6).
 
 ### 4.7 Dataset split
 
-Done by `make_clips.py` (`--ratios`, `--by`, `--seed`):
+Done by the `clips` step (`--ratios`, `--by`, `--seed`):
 
 ```bash
-python 2d/scripts/make_clips.py              # by video, 70 / 15 / 15 per category
-python 2d/scripts/make_clips.py --by dancer  # stricter: one dancer per split
+python 2d/scripts/pipeline.py clips            # by video, 70 / 15 / 15 per category
+python 2d/scripts/pipeline.py clips --by dancer  # stricter: one dancer per split
 ```
 
 Split by **video**, not by clip, to avoid leakage. The split is stratified per category, so every split contains every category (21 videos per category → 15 / 3 / 3). Each AIST genre has only 3 dancers; `--by dancer` keeps each dancer in a single split (7 / 7 / 7 videos), which tests generalization to unseen dancers. The split of every clip is recorded in `meta.csv`.
@@ -155,7 +155,7 @@ Split by **video**, not by clip, to avoid leakage. The split is stratified per c
 ```
 2d/
 ├── README.md
-├── scripts/               # one script per pipeline step (section 4)
+├── scripts/               # pose_dwpose.py, pose_mediapipe.py, pose_openpose.py, pipeline.py
 ├── raw_video/             # source videos (la_hiphop/, house/, ...)
 ├── frames/                # extracted frames (optional, deletable after keypoints)
 ├── keypoints/

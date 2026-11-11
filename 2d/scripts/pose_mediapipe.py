@@ -12,6 +12,7 @@ less accurate variant.
 Output: 2d/keypoints/<category>/<video_id>_mediapipe.npz
     keypoints (T, 17, 3)  COCO-17 x, y (pixels), visibility   <- used by 4.4
     native    (T, 33, 3)  MediaPipe's 33 landmarks
+Next step (4.4): python 2d/scripts/pipeline.py clean --tool mediapipe
 """
 import os
 import sys
@@ -21,7 +22,7 @@ import numpy as np
 
 sys.dont_write_bytecode = True  # keep the repo free of __pycache__ folders
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import MEDIAPIPE33_TO_COCO17, pose_arg_parser, run_pose_tool  # noqa: E402
+from pipeline import MEDIAPIPE33_TO_COCO17, pose_arg_parser, run_pose_tool  # noqa: E402
 
 TOOL = "mediapipe"
 CACHE = os.path.expanduser("~/.cache/beat2body")
