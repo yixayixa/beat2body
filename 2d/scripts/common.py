@@ -17,14 +17,11 @@ import numpy as np
 ROOT_2D = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 RAW_VIDEO_DIR = os.path.join(ROOT_2D, "raw_video")
 FRAMES_DIR = os.path.join(ROOT_2D, "frames")
-KEYPOINTS_RAW_DIR = os.path.join(ROOT_2D, "keypoints_raw")   # per-tool output of 4.3
-KEYPOINTS_DIR = os.path.join(ROOT_2D, "keypoints")           # cleaned output of 4.4
+KEYPOINTS_DIR = os.path.join(ROOT_2D, "keypoints")
 AUDIO_DIR = os.path.join(ROOT_2D, "audio")
 FEATURES_DIR = os.path.join(ROOT_2D, "features")
 CLIPS_DIR = os.path.join(ROOT_2D, "clips")
-PREVIEW_DIR = os.path.join(ROOT_2D, "previews")
 META_CSV = os.path.join(ROOT_2D, "meta.csv")
-SPLITS_JSON = os.path.join(ROOT_2D, "splits.json")
 CATEGORIES_JSON = os.path.join(ROOT_2D, "categories.json")
 
 VIDEO_EXTS = (".mp4", ".mov", ".avi", ".mkv", ".webm")
@@ -144,7 +141,23 @@ def iter_frames(path, fps=DEFAULT_FPS, height=None):
 # Keypoint files
 # ---------------------------------------------------------------------------
 def raw_keypoint_path(tool, category, video_id):
-    return os.path.join(KEYPOINTS_RAW_DIR, tool, category, video_id + ".npz")
+    """Output of a pose tool (4.3): 2d/keypoints/<category>/<video_id>_<tool>.npz"""
+    return os.path.join(KEYPOINTS_DIR, category, f"{video_id}_{tool}.npz")
+
+
+def preview_path(tool, category, video_id):
+    """Skeleton overlay video: 2d/keypoints/<category>/<video_id>_<tool>.mp4"""
+    return os.path.join(KEYPOINTS_DIR, category, f"{video_id}_{tool}.mp4")
+
+
+def feature_path(kind, video_id):
+    """Audio features (4.5): 2d/features/<kind>/<video_id>.npy (AIST ids are unique across categories)"""
+    return os.path.join(FEATURES_DIR, kind, video_id + ".npy")
+
+
+def clean_keypoint_path(category, video_id):
+    """Cleaned keypoints used for training (4.4): 2d/keypoints/<category>/<video_id>.npz"""
+    return os.path.join(KEYPOINTS_DIR, category, video_id + ".npz")
 
 
 def save_raw_keypoints(path, keypoints, native, native_names, tool, fps, width, height, seconds):
@@ -219,7 +232,7 @@ def pose_arg_parser(tool, description):
     p.add_argument("--height", type=int, default=None,
                    help="resize frames to this height before inference (default: original size)")
     p.add_argument("--preview", type=int, default=0,
-                   help=f"also write skeleton preview videos for the first N videos to 2d/previews/{tool}/")
+                   help=f"also write skeleton preview videos (<video_id>_{tool}.mp4) for the first N videos")
     p.add_argument("--overwrite", action="store_true", help="re-run videos that already have output")
     return p
 
@@ -247,8 +260,7 @@ def run_pose_tool(tool, args, make_infer, native_names, color):
             w, h = int(round(w * args.height / h / 2)) * 2, args.height
         preview = None
         if n < args.preview:
-            preview = PreviewWriter(os.path.join(PREVIEW_DIR, tool, cat, vid + ".mp4"),
-                                    args.fps, w, h, f"{tool}  {cat}/{vid}")
+            preview = PreviewWriter(preview_path(tool, cat, vid), args.fps, w, h, f"{tool}  {cat}/{vid}")
         infer = make_infer(args.fps)
         coco, native = [], []
         t0 = time.perf_counter()

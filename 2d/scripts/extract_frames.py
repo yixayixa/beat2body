@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 
+sys.dont_write_bytecode = True  # keep the repo free of __pycache__ folders
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import DEFAULT_FPS, FRAMES_DIR, list_videos  # noqa: E402
 

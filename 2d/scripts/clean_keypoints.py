@@ -3,7 +3,7 @@
 Reads the raw output of ONE pose tool (4.3) and writes the cleaned dataset used
 for training:
 
-    2d/keypoints_raw/<tool>/<category>/<video_id>.npz  ->  2d/keypoints/<category>/<video_id>.npz
+    2d/keypoints/<category>/<video_id>_<tool>.npz  ->  2d/keypoints/<category>/<video_id>.npz
 
 Steps (per joint, along time):
   1. Confidence threshold: joints below --conf become missing (NaN).
@@ -35,9 +35,10 @@ import sys
 
 import numpy as np
 
+sys.dont_write_bytecode = True  # keep the repo free of __pycache__ folders
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import (CONF_THRESHOLD, COCO17_NAMES, KEYPOINTS_DIR, KEYPOINTS_RAW_DIR,  # noqa: E402
-                    L_HIP, L_SHOULDER, R_HIP, R_SHOULDER)
+from common import (CONF_THRESHOLD, COCO17_NAMES, KEYPOINTS_DIR, L_HIP, L_SHOULDER,  # noqa: E402
+                    R_HIP, R_SHOULDER, clean_keypoint_path)
 
 
 # ---------------------------------------------------------------------------
@@ -131,11 +132,11 @@ def main():
     if args.sg_window and args.sg_window % 2 == 0:
         p.error("--sg-window must be odd")
 
-    files = sorted(glob.glob(os.path.join(KEYPOINTS_RAW_DIR, args.tool, "*", "*.npz")))
+    files = sorted(glob.glob(os.path.join(KEYPOINTS_DIR, "*", f"*_{args.tool}.npz")))
     if args.categories:
         files = [f for f in files if os.path.basename(os.path.dirname(f)) in args.categories]
     if not files:
-        sys.exit(f"no raw keypoints in {KEYPOINTS_RAW_DIR}/{args.tool}; run pose_{args.tool}.py first")
+        sys.exit(f"no *_{args.tool}.npz files in {KEYPOINTS_DIR}; run pose_{args.tool}.py first")
 
     # Pass 1: clean every video and collect torso lengths for the global scale.
     cleaned, torsos = {}, []
@@ -153,7 +154,8 @@ def main():
 
     # Pass 2: center on the pelvis, scale, fill long gaps, save.
     for f, (xy, raw, n_spikes) in cleaned.items():
-        cat, vid = os.path.basename(os.path.dirname(f)), os.path.splitext(os.path.basename(f))[0]
+        cat = os.path.basename(os.path.dirname(f))
+        vid = os.path.basename(f)[: -len(f"_{args.tool}.npz")]
         pelvis = (xy[:, L_HIP] + xy[:, R_HIP]) / 2
         for c in range(2):
             pelvis[:, c] = interpolate_gaps(pelvis[:, c], None)  # also bridges long gaps / edges
@@ -166,7 +168,7 @@ def main():
                 filled[:, j, c] = interpolate_gaps(filled[:, j, c], None)
         filled = np.nan_to_num(filled, nan=0.0)                  # joints never observed
 
-        out = os.path.join(KEYPOINTS_DIR, cat, vid + ".npz")
+        out = clean_keypoint_path(cat, vid)
         os.makedirs(os.path.dirname(out), exist_ok=True)
         np.savez_compressed(out, keypoints=filled.astype(np.float32), valid=valid,
                             pelvis=pelvis.astype(np.float32), scale=scale, fps=raw["fps"],

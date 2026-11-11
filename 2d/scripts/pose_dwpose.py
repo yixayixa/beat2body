@@ -11,7 +11,7 @@ No account or token is needed.
 
     python 2d/scripts/pose_dwpose.py --categories la_hiphop house --preview 2
 
-Output: 2d/keypoints_raw/dwpose/<category>/<video_id>.npz
+Output: 2d/keypoints/<category>/<video_id>_dwpose.npz
     keypoints (T, 17, 3)   COCO-17 x, y (pixels), score   <- used by 4.4
     native    (T, 134, 3)  OpenPose-18 body, 6 feet, 68 face, 21 + 21 hand points
 """
@@ -20,6 +20,7 @@ import sys
 
 import numpy as np
 
+sys.dont_write_bytecode = True  # keep the repo free of __pycache__ folders
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import OPENPOSE18_NAMES, OPENPOSE18_TO_COCO17, pose_arg_parser, run_pose_tool  # noqa: E402
 
