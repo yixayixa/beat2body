@@ -22,6 +22,14 @@ git clone -q --depth 1 https://github.com/CMU-Perceptual-Computing-Lab/openpose.
 # pin the Caffe version that is known to build
 sed -i 's/execute_process(COMMAND git checkout --recursive master WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}\/3rdparty\/caffe)/execute_process(COMMAND git checkout f019d0dfe86f49d1140961f8c7dec22130c83154 WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}\/3rdparty\/caffe)/g' openpose/CMakeLists.txt
 (cd openpose && git submodule update --init --recursive --remote > /dev/null)
+(cd openpose/3rdparty/caffe && git checkout -q f019d0dfe86f49d1140961f8c7dec22130c83154)
+
+# Colab ships CUDA 13, which needs C++17 and removed a few old device fields
+sed -i 's/-std=c++11/-std=c++17/g; s/-std=c++14/-std=c++17/g' openpose/CMakeLists.txt
+sed -i 's/    list(APPEND CUDA_NVCC_FLAGS -Xcompiler -fPIC)/    list(APPEND CUDA_NVCC_FLAGS -Xcompiler -fPIC -std=c++17)/' \
+  openpose/3rdparty/caffe/cmake/Cuda.cmake
+sed -i '/prop.clockRate;/d; /prop.deviceOverlap/d; /prop.kernelExecTimeoutEnabled/d; /"Concurrent copy and execution: "/d; /"Kernel execution timeout:      "/d' \
+  openpose/3rdparty/caffe/src/caffe/common.cpp
 
 echo "== 3/5 BODY_25 model (the original CMU download server is offline)"
 MODEL=openpose/models/pose/body_25/pose_iter_584000.caffemodel
