@@ -1,4 +1,4 @@
-"""4.3 Pose estimation with MediaPipe Pose Landmarker (CPU).
+"""4.3 Pose estimation with MediaPipe Pose Landmarker (GPU if available, else CPU).
 
 Install:
     pip install mediapipe opencv-python
@@ -50,6 +50,8 @@ def model_path(variant):
 def main():
     p = pose_arg_parser(TOOL, __doc__)
     p.add_argument("--model", default="heavy", choices=["lite", "full", "heavy"])
+    p.add_argument("--device", default="auto", choices=["auto", "gpu", "cpu"],
+                   help="auto: try the GPU and fall back to the CPU if MediaPipe cannot use it")
     args = p.parse_args()
 
     import cv2
@@ -58,12 +60,33 @@ def main():
     from mediapipe.tasks.python import vision
 
     path = model_path(args.model)
+    delegates = {"gpu": mp_python.BaseOptions.Delegate.GPU, "cpu": mp_python.BaseOptions.Delegate.CPU}
+
+    def gpu_works():
+        """MediaPipe's GPU support depends on the platform and build; test it once on a blank image."""
+        try:
+            probe = vision.PoseLandmarker.create_from_options(vision.PoseLandmarkerOptions(
+                base_options=mp_python.BaseOptions(model_asset_path=path, delegate=delegates["gpu"]),
+                running_mode=vision.RunningMode.IMAGE, num_poses=1))
+            probe.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=np.zeros((256, 256, 3), np.uint8)))
+            probe.close()
+            return True
+        except Exception as e:  # noqa: BLE001
+            print(f"[{TOOL}] GPU not available in MediaPipe ({str(e).splitlines()[0][:120]})")
+            return False
+
+    device = args.device
+    if device in ("auto", "gpu"):
+        device = "gpu" if gpu_works() else "cpu"
+        if args.device == "gpu" and device == "cpu":
+            print(f"[{TOOL}] warning: --device gpu was requested; using the CPU")
+    print(f"[{TOOL}] running on {device}")
 
     def make_infer(fps):
         # VIDEO mode tracks the person across frames and needs strictly increasing
         # timestamps, so a fresh landmarker is created for every video.
         landmarker = vision.PoseLandmarker.create_from_options(vision.PoseLandmarkerOptions(
-            base_options=mp_python.BaseOptions(model_asset_path=path),
+            base_options=mp_python.BaseOptions(model_asset_path=path, delegate=delegates[device]),
             running_mode=vision.RunningMode.VIDEO, num_poses=1))
         state = {"frame": 0}
 
