@@ -14,7 +14,7 @@ tar xfz cmake-3.17.2-Linux-x86_64.tar.gz --strip-components=1 -C /usr/local
 apt-get -qq update > /dev/null
 apt-get -qq install -y libatlas-base-dev libprotobuf-dev libleveldb-dev libsnappy-dev \
   libhdf5-serial-dev protobuf-compiler libgflags-dev libgoogle-glog-dev liblmdb-dev \
-  opencl-headers ocl-icd-opencl-dev libviennacl-dev libboost-all-dev > /dev/null
+  opencl-headers ocl-icd-opencl-dev libviennacl-dev libboost-all-dev libopencv-dev > /dev/null
 
 echo "== 2/5 source code"
 rm -rf openpose
