@@ -2,7 +2,7 @@
 
 Two backends:
   --backend official : the official CMU OpenPose (C++, everything on the GPU), BODY_25
-                       model. It must be built first (see colab_build_openpose.sh on Colab).
+                       model. It must be built first (see 2d/scripts/colab_build_openpose.sh on Colab).
   --backend pytorch  : (default) the PyTorch port described below; no build needed, but the
                        post-processing runs on the CPU and is slow on 1080p video.
 
