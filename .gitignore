@@ -120,12 +120,16 @@ mlruns/
 2d/audio/**/*.flac
 
 # Processed keypoints / features — regenerate from video
+2d/keypoints_raw/**/*.npz
 2d/keypoints/**/*.npz
 2d/keypoints/**/*.npy
 2d/keypoints/**/*.json
 2d/features/**/*.npy
 2d/features/**/*.npz
 2d/features/**/*.pkl
+
+# Skeleton preview videos — regenerable
+2d/previews/
 
 # Sliding-window clips — regenerable
 2d/clips/**/*.npz

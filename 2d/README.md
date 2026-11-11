@@ -44,94 +44,155 @@ Keeping the raw skeleton as the primary artifact ensures later comparison with 3
 
 ## 4. Concrete pipeline
 
+Each step has a script in `2d/scripts/`. Run them from the repository root, in this order:
+
+```bash
+python 2d/scripts/download_aist.py               # 4.1 (videos are already in the repo)
+python 2d/scripts/extract_frames.py --limit 1    # 4.2 (optional, JPEGs for inspection)
+python 2d/scripts/pose_dwpose.py --preview 2     # 4.3 (pick one or more of the three tools)
+python 2d/scripts/pose_mediapipe.py --preview 2
+python 2d/scripts/pose_openpose.py --preview 2
+python 2d/scripts/clean_keypoints.py --tool dwpose   # 4.4 (choose the tool used for training)
+python 2d/scripts/extract_audio_features.py      # 4.5
+python 2d/scripts/split_videos.py                # 4.7 (before 4.6: clips follow the video split)
+python 2d/scripts/make_clips.py                  # 4.6
+```
+
+Every script accepts `--categories` (e.g. `--categories la_hiphop house`) and most accept `--limit N` for a quick test. Use `--help` for all options.
+
+**Requirements:** Python 3.9+, `ffmpeg` on the PATH, `numpy`, `scipy`, `opencv-python`; plus the packages listed at the top of each pose script and `librosa` for 4.5.
+
 ### 4.1 Video collection
 
-- Start with **2 categories**: e.g., _Hip-hop_ and _House_. Aim for **20–50 videos per category**, each 30–120 seconds, with a single dancer and relatively stable camera.
-- Sources: YouTube (Creative Commons), Vimeo, or existing dance datasets that provide raw videos (e.g., AIST++ videos, FineDance videos if accessible).
-- Drop files into `2d/raw_video/<category>/`.
+- Source: the **AIST Dance Video Database** (refined 2 Mbps videos, advanced choreography `sFM`, front camera `c01`). All 10 genres are included, 21 videos each (3 dancers × 7), 28–48 seconds per video. Folder names: `la_hiphop` (LA-style Hip-hop, `gLH`), `house` (`gHO`), `middle_hiphop` (`gMH`), `break` (`gBR`), `pop` (`gPO`), `lock` (`gLO`), `waack` (`gWA`), `krump` (`gKR`), `street_jazz` (`gJS`), `ballet_jazz` (`gJB`).
+- Files are in `2d/raw_video/<category>/` and keep their original AIST names, which encode the dancer (`dXX`).
+- `2d/data/aist_videos.csv` lists every video with its URL; `download_aist.py` re-downloads them.
+- **Terms of use:** AIST Dance DB is free for academic research; redistribution is not permitted and the database must be cited (Tsuchida et al., ISMIR 2019). See https://aistdancedb.ongaaccel.jp/terms_of_use/.
+- Other sources (YouTube Creative Commons, Vimeo, FineDance) can be added as new folders in `2d/raw_video/`.
 
 ### 4.2 Frame extraction
 
-Use `ffmpeg` at a fixed frame rate (e.g., 30 fps) to avoid variable frame timing:
+The AIST videos are **59.94 fps**. Everything downstream uses a fixed **30 fps**, resampled with `ffmpeg -vf fps=30` to avoid variable frame timing:
 
 ```bash
-ffmpeg -i 2d/raw_video/hiphop/vid_001.mp4 -vf fps=30 2d/frames/hiphop/vid_001/%06d.jpg
+python 2d/scripts/extract_frames.py --categories la_hiphop --limit 1
+# -> 2d/frames/la_hiphop/<video_id>/000001.jpg ...
 ```
 
-Alternatively, extract frames in Python with OpenCV (`cv2.VideoCapture` + `cv2.imwrite`).
+This step is optional: the pose scripts read the videos directly at the same 30 fps, so JPEGs are only needed for inspection. Dumping all 210 videos as 1080p JPEGs takes 20+ GB.
 
 ### 4.3 Pose estimation
 
-Run DWPOSE on each frame. The `easy-dwpose` package can process a folder of images (helper script planned):
+The three tools from section 3 are separate scripts with the same options and the same output format, so they can be run and compared independently:
+
+| Script              | Model                                         | Runs on        | Native joints                     |
+| ------------------- | --------------------------------------------- | -------------- | --------------------------------- |
+| `pose_dwpose.py`    | DWPose-L whole-body (ONNX)                    | GPU (or CPU)   | 134 (body 18, feet, face, hands)  |
+| `pose_mediapipe.py` | MediaPipe Pose Landmarker (heavy)             | CPU            | 33                                |
+| `pose_openpose.py`  | OpenPose BODY-18 (PyTorch port of the model)  | GPU (or CPU)   | 18                                |
 
 ```bash
-python scripts/inference_on_folder.py --input 2d/frames/hiphop/vid_001/ --output_path 2d/keypoints/hiphop/
+python 2d/scripts/pose_dwpose.py --categories la_hiphop house --preview 2
 ```
 
-- Save keypoints as JSON per frame in **OpenPose format** (DWPOSE outputs this natively), which contains `people[0]["pose_keypoints_2d"]` as a flat list `[x1, y1, c1, x2, y2, c2, …]` where `c` is confidence.
-- Convert to a structured NumPy array: reshape to `(J, 3)` (x, y, confidence), then stack over time to `(T, J, 3)`.
+- Output: `2d/keypoints_raw/<tool>/<category>/<video_id>.npz` with `keypoints` of shape `(T, 17, 3)` (x, y in pixels, confidence) in the shared **COCO-17** joint order, and `native` with the tool's own joint layout.
+- All three tools are mapped to COCO-17 so their outputs can be compared directly and any of them can feed 4.4. COCO-17 has no neck or pelvis joint; the pelvis is the mid-point of the two hips.
+- Frames where no person is found are `NaN`. If several people are found, the most confident one is kept.
+- `--preview N` writes skeleton overlay videos for the first N videos to `2d/previews/<tool>/` for visual checks.
+- Model weights download automatically on first run (DWPose and OpenPose from public Hugging Face repos, MediaPipe from Google); no account is needed.
+- The confidence values are on different scales per tool, so each tool has its own default threshold (DWPose 0.3, MediaPipe 0.5, OpenPose 0.1).
+- OpenPose models are licensed for academic / non-commercial research only.
 
 ### 4.4 Keypoint cleaning and interpolation
 
-- **Confidence thresholding:** set keypoints with `c < 0.3` to `NaN`.
-- **Linear interpolation** over short gaps (≤ 5 frames) along the time axis for each joint independently.
-- **Outlier removal:** for each joint, compute the velocity; if a displacement exceeds a robust threshold (e.g., 3× the median displacement), mark as outlier and interpolate.
-- **Smoothing (optional):** apply a small Savitzky–Golay filter (window 5–7 frames) to reduce jitter without destroying beats.
-- **Normalization:** translate so the pelvis joint is at `(0,0)`, and scale by a constant factor (e.g., divide by the median torso length across the dataset) so all skeletons are comparable. Save the normalization parameters with the dataset.
+```bash
+python 2d/scripts/clean_keypoints.py --tool dwpose
+```
+
+Reads `2d/keypoints_raw/<tool>/` and writes the training keypoints to `2d/keypoints/<category>/<video_id>.npz`:
+
+- **Confidence thresholding:** keypoints below the tool's threshold (`--conf`) are set to `NaN`.
+- **Outlier removal:** a single-frame spike, where a joint jumps away by more than 3× its median displacement and comes straight back, is marked as missing. Fast but consistent motion is kept.
+- **Linear interpolation** over short gaps (≤ 5 frames, `--max-gap`) along the time axis for each joint independently.
+- **Smoothing:** Savitzky–Golay filter, window 7, order 2 (`--sg-window`, 0 disables it).
+- **Normalization:** the pelvis (mid-hip) is moved to `(0, 0)` and coordinates are divided by the median torso length (mid-shoulder to mid-hip) over the whole dataset. Parameters are saved to `2d/keypoints/normalization.json`; each file also stores its `pelvis` track and `scale` to undo the normalization.
+- Output arrays: `keypoints (T, 17, 2)` with longer gaps filled linearly, and `valid (T, 17)` marking which values were observed (use it as a loss mask).
 
 ### 4.5 Audio feature extraction
 
-Extract audio from the video as mono 22.05 kHz:
-
 ```bash
-ffmpeg -i 2d/raw_video/hiphop/vid_001.mp4 -vn -ac 1 -ar 22050 2d/audio/hiphop/vid_001.wav
+python 2d/scripts/extract_audio_features.py --categories la_hiphop house
 ```
 
-Compute features with `librosa`:
+- Audio is extracted as mono 22.05 kHz to `2d/audio/<category>/<video_id>.wav`.
+- **Log-mel spectrogram:** `n_mels=64`, `hop_length=735` (22050 / 30), so one feature frame corresponds to one motion frame → `features/audio_mel/` `(T, 64)`.
+- **Onset strength envelope:** `librosa.onset.onset_strength` → `features/audio_onset/` `(T,)`.
+- **Beats and onsets:** `librosa.beat.beat_track` → `features/beats/` and `librosa.onset.onset_detect` → `features/onsets/`, as frame indices in motion-frame units, for the beat-alignment loss and evaluation.
+- **MFCCs (optional):** `--mfcc` saves 13 coefficients to `features/audio_mfcc/`.
 
-- **Log-mel spectrogram:** `n_mels=64`, `hop_length` set so that one feature frame corresponds to one motion frame (e.g., if motion is 30 fps and audio sr=22050, `hop_length=735` gives exactly 30 fps).
-- **Onset strength envelope:** `librosa.onset.onset_strength` — useful for beat alignment.
-- **MFCCs (optional):** 13 coefficients for timbral context.
-- **Beat/onset times:** `librosa.beat.beat_track` or `librosa.onset.onset_detect` — store the detected onset frame indices (in motion-frame units) for the beat-alignment loss and evaluation. See the [librosa tutorial](https://librosa.org/doc/latest/tutorial.html).
+See the [librosa tutorial](https://librosa.org/doc/latest/tutorial.html).
 
 ### 4.6 Alignment
 
-- Since you extract frames at 30 fps and compute audio features with a hop length that yields 30 fps, **frame `t` in motion corresponds to feature frame `t` in audio**. This is the simplest and most robust alignment.
-- **Variable-length videos:** do **not** force everything to the same length. Use **sequence batching with padding** and a **mask** in the loss. Alternatively, use a **sliding window** approach: cut each video into overlapping clips of 120–300 frames with a stride of 60 frames. Store each clip with its corresponding audio-feature slice and category label.
+```bash
+python 2d/scripts/make_clips.py --window 240 --stride 60
+```
+
+- Motion and audio features are both at 30 fps, so **frame `t` in motion corresponds to feature frame `t` in audio**; alignment only trims both to the shorter length.
+- **Variable-length videos:** do **not** force everything to the same length. The script uses a **sliding window**: overlapping clips of 120–300 frames (`--window`, default 240) with a stride of 60 frames. Each clip in `2d/clips/<split>/` stores its keypoints, valid mask, audio-feature slices, beats and category label.
+- `2d/meta.csv` lists every clip: `clip_path, audio_feat_path, category, start_frame, end_frame, split, video_id, dancer`.
 
 ### 4.7 Dataset split
 
-Split by **video**, not by clip, to avoid leakage. For example, 70% videos for training, 15% for validation, 15% for test. If you have 40 videos total, this is 28/6/6 videos. Ensure each split contains both categories.
+```bash
+python 2d/scripts/split_videos.py              # by video, 70 / 15 / 15 per category
+python 2d/scripts/split_videos.py --by dancer  # stricter: one dancer per split
+```
+
+Split by **video**, not by clip, to avoid leakage. The split is stratified per category, so every split contains every category (21 videos per category → 15 / 3 / 3). Each AIST genre has only 3 dancers; `--by dancer` keeps each dancer in a single split (7 / 7 / 7 videos), which tests generalization to unseen dancers. Writes `2d/splits.json` and `2d/categories.json` (the fixed category → index mapping for the embedding).
 
 ## 5. Dataset layout
 
 ```
 2d/
 ├── README.md
-├── raw_video/             # source videos (hiphop/, house/)
-├── frames/                # extracted frames (optional, deletable after keypoints)
+├── scripts/               # one script per pipeline step (section 4)
+├── data/aist_videos.csv   # video list with source URLs
+├── raw_video/             # source videos (la_hiphop/, house/, ...)
+├── frames/                # extracted frames (optional, deletable)
+├── keypoints_raw/
+│   ├── dwpose/
+│   │   └── la_hiphop/
+│   │       └── <video_id>.npz   # keypoints (T, 17, 3), native (T, J, 3)
+│   ├── mediapipe/
+│   └── openpose/
+├── previews/              # skeleton overlay videos from --preview
 ├── keypoints/
-│   ├── hiphop/
-│   │   └── vid_001.npz    # shape (T, J, 3)
-│   └── house/
+│   ├── la_hiphop/
+│   │   └── <video_id>.npz # keypoints (T, 17, 2), valid (T, 17)
+│   ├── house/
+│   └── normalization.json
 ├── audio/
-│   ├── hiphop/
-│   │   └── vid_001.wav
+│   ├── la_hiphop/
+│   │   └── <video_id>.wav
 │   └── house/
 ├── features/
 │   ├── audio_mel/         # (T, 64)
 │   ├── audio_onset/       # (T,)
-│   └── beats/             # (num_beats,) indices
+│   ├── beats/             # (num_beats,) indices
+│   └── onsets/            # (num_onsets,) indices
 ├── clips/                 # sliding-window clips
 │   ├── train/
 │   ├── val/
 │   └── test/
-└── meta.csv               # clip_path, audio_feat_path, category, start_frame, end_frame
+├── splits.json            # video -> split
+├── categories.json        # category -> index
+└── meta.csv               # clip_path, audio_feat_path, category, start_frame, end_frame, split, video_id, dancer
 ```
 
 **File formats:** use `.npz` for keypoints (compressed, fast) and `.npy` for features. Keep a `meta.csv` that lists every clip with its category and paths so training is reproducible.
 
-**Note:** empty directories are not tracked by git. Add a `.gitkeep` to each empty folder (`frames/`, `audio/hiphop/`, `clips/train/`, …) so the layout exists after clone.
+**Note:** empty directories are not tracked by git. Add a `.gitkeep` to each empty folder (`frames/`, `audio/la_hiphop/`, `clips/train/`, …) so the layout exists after clone. Pipeline outputs (frames, keypoints, audio, features, clips, previews) are ignored by `.gitignore` and can be rebuilt by re-running the scripts.
 
 ## 6. Dance category conditioning
 
@@ -139,7 +200,7 @@ Split by **video**, not by clip, to avoid leakage. For example, 70% videos for t
 
 **Where to inject:** inject the category embedding at **every decoder step**. For a GRU decoder, concatenate the embedding to the input at each time step (or add it to the hidden state via a linear projection). For a Transformer decoder, add it as a **prefix token** or as an additive bias to the decoder's hidden states. The latter (additive bias) ensures the category signal is available throughout generation, not just at the start.[^1][^2][^3]
 
-**Inference exposure:** expose `category` as a string argument (`"hiphop"` or `"house"`). Map it to an integer index via a fixed dictionary, then to the embedding. When you expand to more categories, you only need to update the mapping and retrain (or fine-tune) the embedding table; the rest of the architecture remains unchanged.
+**Inference exposure:** expose `category` as a string argument (e.g. `"la_hiphop"` or `"house"`). Map it to an integer index via a fixed dictionary, then to the embedding. When you expand to more categories, you only need to update the mapping and retrain (or fine-tune) the embedding table; the rest of the architecture remains unchanged.
 
 **Expansion plan:** keep the category vocabulary in a separate `categories.json` file. The model checkpoint should store `num_categories` and the embedding dimension. Adding a new category later means adding one row to the embedding table and fine-tuning on data for the new category.
 
