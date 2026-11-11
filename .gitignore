@@ -123,7 +123,6 @@ mlruns/
 2d/keypoints/**/*.npz
 2d/keypoints/**/*.npy
 2d/keypoints/**/*.json
-2d/keypoints/**/*.mp4
 2d/features/**/*.npy
 2d/features/**/*.npz
 2d/features/**/*.pkl
